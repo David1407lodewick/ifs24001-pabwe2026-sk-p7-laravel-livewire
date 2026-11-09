@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+    <defs>
+        <linearGradient id="todo-grad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#2563EB" />
+            <stop offset="50%" stop-color="#4F46E5" />
+            <stop offset="100%" stop-color="#7C3AED" />
+        </linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="18" fill="url(#todo-grad)" />
+    <path d="M19 33.5L27.5 42L45 22.5" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
+

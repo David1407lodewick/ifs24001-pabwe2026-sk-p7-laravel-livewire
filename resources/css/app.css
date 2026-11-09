@@ -1,0 +1,125 @@
+@import 'tailwindcss';
+
+@source '../../resources/views/**/*.blade.php';
+@source '../../app';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-mono: ui-monospace, SFMono-Regular, 'Cascadia Code', 'Segoe UI Mono', monospace;
+    --radius-lg: 0.375rem;
+    --radius-xl: 0.5rem;
+    --radius-2xl: 0.75rem;
+    --color-blue-50: #f0fdfa;
+    --color-blue-100: #ccfbf1;
+    --color-blue-200: #99f6e4;
+    --color-blue-300: #5eead4;
+    --color-blue-400: #2dd4bf;
+    --color-blue-500: #14b8a6;
+    --color-blue-600: #0f766e;
+    --color-blue-700: #115e59;
+    --color-blue-800: #134e4a;
+    --color-blue-900: #042f2e;
+    --color-indigo-50: #f0fdfa;
+    --color-indigo-100: #ccfbf1;
+    --color-indigo-200: #99f6e4;
+    --color-indigo-300: #5eead4;
+    --color-indigo-400: #2dd4bf;
+    --color-indigo-500: #14b8a6;
+    --color-indigo-600: #0f766e;
+    --color-indigo-700: #115e59;
+    --color-indigo-800: #134e4a;
+    --color-indigo-900: #042f2e;
+    --color-slate-50: #fafaf9;
+    --color-slate-100: #f5f5f4;
+    --color-slate-200: #e7e5e4;
+    --color-slate-300: #d6d3d1;
+    --color-slate-400: #57534e;
+    --color-slate-500: #78716c;
+    --color-slate-600: #57534e;
+    --color-slate-700: #44403c;
+    --color-slate-800: #292524;
+    --color-slate-900: #1c1917;
+    --color-gray-50: #fafaf9;
+    --color-gray-100: #f5f5f4;
+    --color-gray-200: #e7e5e4;
+    --color-gray-300: #d6d3d1;
+    --color-gray-400: #57534e;
+    --color-gray-500: #78716c;
+    --color-gray-600: #57534e;
+    --color-gray-700: #44403c;
+    --color-gray-800: #292524;
+    --color-gray-900: #1c1917;
+    --color-purple-50: #fffbeb;
+    --color-purple-100: #fef3c7;
+    --color-purple-200: #fde68a;
+    --color-purple-300: #fcd34d;
+    --color-purple-400: #fbbf24;
+    --color-purple-500: #f59e0b;
+    --color-purple-600: #d97706;
+    --color-purple-700: #b45309;
+    --color-purple-800: #92400e;
+    --color-purple-900: #78350f;
+    --color-ink: #12201f;
+    --color-rose-600: #be123c;
+    --color-rose-700: #9f1239;
+}
+
+@layer components {
+    .markdown-content > :first-child {
+        margin-top: 0;
+    }
+
+    .markdown-content > * + * {
+        margin-top: 0.75rem;
+    }
+
+    .markdown-content h1,
+    .markdown-content h2,
+    .markdown-content h3 {
+        color: var(--color-slate-900);
+        font-weight: 700;
+        line-height: 1.25;
+    }
+
+    .markdown-content h1 {
+        font-size: 1.5rem;
+    }
+
+    .markdown-content h2 {
+        font-size: 1.25rem;
+    }
+
+    .markdown-content h3 {
+        font-size: 1.125rem;
+    }
+
+    .markdown-content ul {
+        list-style-type: disc;
+        padding-left: 1.5rem;
+    }
+
+    .markdown-content ol {
+        list-style-type: decimal;
+        padding-left: 1.5rem;
+    }
+
+    .markdown-content a {
+        color: var(--color-teal-700);
+        text-decoration: underline;
+    }
+
+    .markdown-content pre {
+        overflow-x: auto;
+        border-radius: 0.5rem;
+        background-color: var(--color-slate-100);
+        padding: 1rem;
+    }
+
+    .markdown-content blockquote {
+        border-left: 3px solid var(--color-slate-300);
+        padding-left: 1rem;
+        color: var(--color-slate-600);
+    }
+}
