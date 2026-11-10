@@ -542,52 +542,75 @@ pipeline {
 
                     echo "Redeploy Response:"
                     echo redeployResponse
-
-                    // ==================================================
-                    // 2. POLLING DEPLOYMENT PROGRESS
-                    // ==================================================
-
-                    echo ""
-                    echo "=== Waiting For Deployment ==="
-
-                    def maxAttempts = 120
-                    def attempt = 0
-                    def deploymentStatus = 'IN_PROGRESS'
-
-                    while (deploymentStatus == 'IN_PROGRESS') {
-
-                        attempt++
-
-                        if (attempt > maxAttempts) {
-                            error(
-                                "Deployment timeout. " +
-                                "Status masih IN_PROGRESS setelah " +
-                                "${maxAttempts} attempts."
-                            )
-                        }
-
-                        sleep time: 5, unit: 'SECONDS'
+                        // ==================================================
+                        // 2. POLLING DEPLOYMENT PROGRESS
+                        // ==================================================
 
                         echo ""
-                        echo "=== Checking Deployment Progress (${attempt}/${maxAttempts}) ==="
+                        echo "=== Waiting For Deployment ==="
 
-                        def progressResponse = sh(
-                            script: '''
-                                set -e
+                        // Validasi credentials sebelum polling
+                        if (!env.DEPLOY_TOKEN?.trim()) {
+                            error("DEPLOY_TOKEN belum dikonfigurasi di Jenkins!")
+                        }
 
-                                curl -sS --fail-with-body \
-                                    -X POST "$URL_PROGRESS" \
-                                    -H "Content-Type: application/json" \
-                                    -d "{
-                                        \\"token_access\\": \\"$DEPLOY_TOKEN\\",
-                                        \\"website_id\\": \\"$WEBSITE_ID\\"
-                                    }"
-                            ''',
-                            returnStdout: true
-                        ).trim()
+                        if (!env.WEBSITE_ID?.trim()) {
+                            error("WEBSITE_ID belum dikonfigurasi di Jenkins!")
+                        }
 
-                        echo "Progress Response:"
-                        echo progressResponse
+                        def maxAttempts = 120
+                        def attempt = 0
+                        def deploymentStatus = 'IN_PROGRESS'
+
+                        while (deploymentStatus == 'IN_PROGRESS') {
+
+                            attempt++
+
+                            if (attempt > maxAttempts) {
+                                error(
+                                    "Deployment timeout. " +
+                                    "Status masih IN_PROGRESS setelah " +
+                                    "${maxAttempts} attempts."
+                                )
+                            }
+
+                            sleep time: 5, unit: 'SECONDS'
+
+                            echo ""
+                            echo "=== Checking Deployment Progress (${attempt}/${maxAttempts}) ==="
+
+                            def progressResponse = sh(
+                                script: '''
+                                    set -e
+
+                                    curl -sS --fail-with-body \
+                                        -X POST "$URL_PROGRESS" \
+                                        -H "Content-Type: application/json" \
+                                        -d "{
+                                            \\"token_access\\": \\"$DEPLOY_TOKEN\\",
+                                            \\"website_id\\": \\"$WEBSITE_ID\\"
+                                        }"
+                                ''',
+                                returnStdout: true
+                            ).trim()
+
+                            echo "Progress Response:"
+                            echo progressResponse
+
+                            def progressJson = readJSON text: progressResponse
+
+                            deploymentStatus = progressJson.data.status
+
+                            echo "Current Deployment Status: ${deploymentStatus}"
+
+                            if (deploymentStatus == 'SUCCESS') {
+                                echo "Deployment berhasil!"
+                            } else if (deploymentStatus == 'FAIL') {
+                                error("Deployment gagal! Periksa log deployment.")
+                            } else if (deploymentStatus != 'IN_PROGRESS') {
+                                error("Status deployment tidak dikenal: ${deploymentStatus}")
+                            }
+                        }
 
                         // ==================================================
                         // PARSE JSON
