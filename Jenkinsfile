@@ -47,7 +47,10 @@ pipeline {
 
                     bun install
 
-                    echo "=== Dependencies Installed ==="
+                    echo "=== Building Laravel frontend assets ==="
+                    bun run build
+
+                    echo "=== Dependencies Installed and Assets Built ==="
                 '''
             }
         }
@@ -55,11 +58,13 @@ pipeline {
         // ============================================================
         // TEST
         // ============================================================
+        
         stage('Test') {
             agent {
                 docker {
-                    image 'node:24-alpine'
+                    image 'php:8.5-cli-alpine'
                     reuseNode true
+                    args '-u root'
                 }
             }
 
@@ -67,11 +72,38 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "=== Running Tests with Coverage ==="
+                    echo "=== Installing PHP extensions and Composer ==="
 
-                    npx vitest run --coverage
+                    apk add --no-cache curl unzip git \
+                        $PHPIZE_DEPS sqlite-dev libzip-dev \
+                        libpng-dev freetype-dev libjpeg-turbo-dev \
+                        oniguruma-dev libxml2-dev icu-dev
 
-                    echo "=== Tests Passed ==="
+                    docker-php-ext-configure gd --with-freetype --with-jpeg
+
+                    docker-php-ext-install \
+                        pdo_sqlite sqlite3 mbstring xml dom simplexml \
+                        xmlreader xmlwriter zip gd intl
+
+                    curl -sS https://getcomposer.org/installer -o composer-setup.php
+                    php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+                    rm -f composer-setup.php
+
+                    echo "=== Preparing Laravel environment ==="
+
+                    cp .env.example .env
+
+                    echo "=== Installing Composer dependencies ==="
+
+                    composer install --no-interaction --prefer-dist --optimize-autoloader
+
+                    php artisan key:generate --force
+
+                    echo "=== Running PHPUnit tests ==="
+
+                    composer test
+
+                    echo "=== PHPUnit Tests Passed ==="
                 '''
             }
         }

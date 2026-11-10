@@ -23,7 +23,9 @@ Route::get('/', function () {
             : redirect()->route('stocks.index');
     }
 
-    return redirect()->route('login');
+    // Tampilkan halaman login langsung pada route utama agar / menghasilkan HTTP 200.
+    // Nama route 'home' juga membuat layout meng-inline stylesheet untuk halaman publik.
+    return view('livewire.auth.login');
 })->name('home');
 
 Route::middleware(['throttle:1000-per-second'])->group(function () {
