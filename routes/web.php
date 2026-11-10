@@ -28,6 +28,15 @@ Route::get('/', function () {
     return view('livewire.auth.login');
 })->name('home');
 
+// Halaman yang membutuhkan autentikasi
+Route::middleware('auth')->group(function () {
+
+    Route::get('/stocks', StockList::class)
+        ->middleware('owns.stock')
+        ->name('stocks.index');
+
+});
+
 Route::middleware(['throttle:1000-per-second'])->group(function () {
 
     // Halaman login dan register selalu dapat diakses publik
