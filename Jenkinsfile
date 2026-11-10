@@ -483,24 +483,38 @@ pipeline {
         // ============================================================
         // DEPLOY APPLICATION
         // ============================================================
-        stage('Deploy Application') {
-            agent {
-                docker {
-                    image 'curlimages/curl:8.15.0'
-                    reuseNode true
-                    args '--network cicd-network'
-                }
-            }
+       stage('Deploy Application'){
+                        agent {
+                            docker {
+                                image 'curlimages/curl:8.15.0'
+                                reuseNode true
+                            }
+                        }
 
-            steps {
-                script {
+                        steps {
+                            sh '''
+                                set -e
 
-                    echo "=========================================="
-                    echo "       START APPLICATION DEPLOYMENT"
-                    echo "=========================================="
+                                echo "=========================================="
+                                echo "       START APPLICATION DEPLOYMENT"
+                                echo "=========================================="
 
-                    echo "Artifact URL:"
-                    echo "${env.ARTIFACT_URL}"
+                                # VALIDATE DEPLOYMENT CREDENTIALS
+
+                                if [ -z "$DEPLOY_TOKEN" ]; then
+                                    echo "ERROR: DEPLOY_TOKEN belum dikonfigurasi!"
+                                    exit 1
+                                fi
+
+                                if [ -z "$WEBSITE_ID" ]; then
+                                    echo "ERROR: WEBSITE_ID belum dikonfigurasi!"
+                                    exit 1
+                                fi
+
+                                echo "Deployment credentials berhasil ditemukan."
+                            }
+                        }
+
 
                     // ==================================================
                     // 1. REQUEST REDEPLOYMENT
