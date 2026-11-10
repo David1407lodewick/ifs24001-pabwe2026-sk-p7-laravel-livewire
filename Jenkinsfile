@@ -13,8 +13,9 @@ pipeline {
         COMPOSER_ALLOW_SUPERUSER = '1'
         COMPOSER_NO_INTERACTION = '1'
 
-        DEPLOY_TOKEN = credentials('DEPLOY_TOKEN')
-        WEBSITE_ID = credentials('WEBSITE_ID')
+        URL_PROGRESS = 'https://delcom.org/api/dws/websites/progress'
+        URL_REDEPLOY = 'https://delcom.org/api/dws/websites/redeploy'
+
     }
 
     stages {
