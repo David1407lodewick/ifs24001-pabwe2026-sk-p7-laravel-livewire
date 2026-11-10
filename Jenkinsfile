@@ -150,133 +150,146 @@ pipeline {
             }
 
             steps {
-                sh '''
-                    set -e
+                script {
 
-                    echo "=== Re-check critical extensions ==="
+                    int testExit = sh(
+                        script: '''
+                            set -e
 
-                    php -r '
-                        foreach (["gd", "zip", "mbstring", "pdo_sqlite"] as $ext) {
-                            if (!extension_loaded($ext)) {
-                                fwrite(STDERR, "Missing extension: {$ext}" . PHP_EOL);
-                                exit(1);
-                            }
-                        }
+                            echo "=== Re-check critical extensions ==="
 
-                        if (!extension_loaded("pcov") && !extension_loaded("xdebug")) {
-                            fwrite(STDERR, "Missing coverage driver: need pcov or xdebug" . PHP_EOL);
-                            exit(1);
-                        }
+                            php -r '
+                                foreach (["gd", "zip", "mbstring", "pdo_sqlite"] as $ext) {
+                                    if (!extension_loaded($ext)) {
+                                        fwrite(STDERR, "Missing extension: {$ext}" . PHP_EOL);
+                                        exit(1);
+                                    }
+                                }
 
-                        echo "OK: PHP extensions and coverage driver ready." . PHP_EOL;
-                    '
+                                if (!extension_loaded("pcov") && !extension_loaded("xdebug")) {
+                                    fwrite(STDERR, "Missing coverage driver: need pcov or xdebug" . PHP_EOL);
+                                    exit(1);
+                                }
 
-                    echo "=== Preparing Laravel Testing Environment ==="
+                                echo "OK: PHP extensions and coverage driver ready." . PHP_EOL;
+                            '
 
-                    if [ ! -f .env ]; then
-                        cp .env.example .env
-                    fi
+                            echo "=== Preparing Laravel Testing Environment ==="
 
-                    php artisan key:generate --force
-                    php artisan config:clear
-                    php artisan view:clear
+                            if [ ! -f .env ]; then
+                                cp .env.example .env
+                            fi
 
-                    echo "=== Running PHPUnit with Coverage ==="
+                            php artisan key:generate --force
+                            php artisan config:clear
+                            php artisan view:clear
 
-                    php vendor/bin/phpunit \
-                        --colors=never \
-                        --coverage-text=coverage.txt \
-                        --coverage-clover=coverage.xml \
-                        --coverage-html=coverage-html
+                            echo "=== Running PHPUnit with Coverage ==="
 
-                    echo "=== Tests Passed ==="
+                            php vendor/bin/phpunit \
+                                --colors=never \
+                                --coverage-text=coverage.txt \
+                                --coverage-clover=coverage.xml \
+                                --coverage-html=coverage-html
 
-                    ls -lh coverage.xml coverage.txt || true
+                            echo "=== Tests Passed ==="
 
-                    echo "=== Enforcing 100% Coverage ==="
+                            ls -lh coverage.xml coverage.txt || true
 
-                    php -r '
-                        if (!is_file("coverage.xml")) {
-                            fwrite(STDERR, "coverage.xml tidak ditemukan." . PHP_EOL);
-                            exit(1);
-                        }
+                            echo "=== Enforcing 100% Coverage ==="
 
-                        $xml = @simplexml_load_file("coverage.xml");
+                            php -r '
+                                if (!is_file("coverage.xml")) {
+                                    fwrite(STDERR, "coverage.xml tidak ditemukan." . PHP_EOL);
+                                    exit(1);
+                                }
 
-                        if ($xml === false) {
-                            fwrite(STDERR, "coverage.xml tidak dapat diparse." . PHP_EOL);
-                            exit(1);
-                        }
+                                $xml = @simplexml_load_file("coverage.xml");
 
-                        $metrics = $xml->project->metrics ?? null;
+                                if ($xml === false) {
+                                    fwrite(STDERR, "coverage.xml tidak dapat diparse." . PHP_EOL);
+                                    exit(1);
+                                }
 
-                        if ($metrics === null) {
-                            $nodes = $xml->xpath("//project/metrics");
-                            $metrics = $nodes[0] ?? null;
-                        }
+                                $metrics = $xml->project->metrics ?? null;
 
-                        if ($metrics === null) {
-                            fwrite(STDERR, "Metrik coverage tidak ditemukan." . PHP_EOL);
-                            exit(1);
-                        }
+                                if ($metrics === null) {
+                                    $nodes = $xml->xpath("//project/metrics");
+                                    $metrics = $nodes[0] ?? null;
+                                }
 
-                        $statements = (int) $metrics["statements"];
-                        $coveredStatements = (int) $metrics["coveredstatements"];
-                        $methods = (int) $metrics["methods"];
-                        $coveredMethods = (int) $metrics["coveredmethods"];
-                        $elements = (int) $metrics["elements"];
-                        $coveredElements = (int) $metrics["coveredelements"];
+                                if ($metrics === null) {
+                                    fwrite(STDERR, "Metrik coverage tidak ditemukan." . PHP_EOL);
+                                    exit(1);
+                                }
 
-                        if ($statements <= 0) {
-                            fwrite(STDERR, "Tidak ada statement yang diukur." . PHP_EOL);
-                            exit(1);
-                        }
+                                $statements = (int) $metrics["statements"];
+                                $coveredStatements = (int) $metrics["coveredstatements"];
+                                $methods = (int) $metrics["methods"];
+                                $coveredMethods = (int) $metrics["coveredmethods"];
+                                $elements = (int) $metrics["elements"];
+                                $coveredElements = (int) $metrics["coveredelements"];
 
-                        $linePct = round(100 * $coveredStatements / $statements, 2);
-                        $methodPct = $methods > 0
-                            ? round(100 * $coveredMethods / $methods, 2)
-                            : 100.0;
-                        $elementPct = $elements > 0
-                            ? round(100 * $coveredElements / $elements, 2)
-                            : 100.0;
+                                if ($statements <= 0) {
+                                    fwrite(STDERR, "Tidak ada statement yang diukur." . PHP_EOL);
+                                    exit(1);
+                                }
 
-                        echo "Coverage summary (source=app/):" . PHP_EOL;
-                        echo "Lines/Statements: {$coveredStatements}/{$statements} ({$linePct}%)" . PHP_EOL;
-                        echo "Methods: {$coveredMethods}/{$methods} ({$methodPct}%)" . PHP_EOL;
-                        echo "Elements: {$coveredElements}/{$elements} ({$elementPct}%)" . PHP_EOL;
+                                $linePct = round(100 * $coveredStatements / $statements, 2);
 
-                        $failed = false;
+                                $methodPct = $methods > 0
+                                    ? round(100 * $coveredMethods / $methods, 2)
+                                    : 100.0;
 
-                        if ($coveredStatements < $statements) {
-                            fwrite(STDERR, "FAIL: Line coverage harus 100%." . PHP_EOL);
-                            $failed = true;
-                        }
+                                $elementPct = $elements > 0
+                                    ? round(100 * $coveredElements / $elements, 2)
+                                    : 100.0;
 
-                        if ($methods > 0 && $coveredMethods < $methods) {
-                            fwrite(STDERR, "FAIL: Method coverage harus 100%." . PHP_EOL);
-                            $failed = true;
-                        }
+                                echo "Coverage summary (source=app/):" . PHP_EOL;
+                                echo "Lines/Statements: {$coveredStatements}/{$statements} ({$linePct}%)" . PHP_EOL;
+                                echo "Methods: {$coveredMethods}/{$methods} ({$methodPct}%)" . PHP_EOL;
+                                echo "Elements: {$coveredElements}/{$elements} ({$elementPct}%)" . PHP_EOL;
 
-                        if ($elements > 0 && $coveredElements < $elements) {
-                            fwrite(STDERR, "FAIL: Element coverage harus 100%." . PHP_EOL);
-                            $failed = true;
-                        }
+                                $failed = false;
 
-                        if ($failed) {
-                            exit(1);
-                        }
+                                if ($coveredStatements < $statements) {
+                                    fwrite(STDERR, "FAIL: Line coverage harus 100%." . PHP_EOL);
+                                    $failed = true;
+                                }
 
-                        echo "OK: Coverage 100%." . PHP_EOL;
-                    '
-                '''
-            }
+                                if ($methods > 0 && $coveredMethods < $methods) {
+                                    fwrite(STDERR, "FAIL: Method coverage harus 100%." . PHP_EOL);
+                                    $failed = true;
+                                }
 
-            post {
-                always {
+                                if ($elements > 0 && $coveredElements < $elements) {
+                                    fwrite(STDERR, "FAIL: Element coverage harus 100%." . PHP_EOL);
+                                    $failed = true;
+                                }
+
+                                if ($failed) {
+                                    exit(1);
+                                }
+
+                                echo "OK: Coverage 100%." . PHP_EOL;
+                            '
+                        ''',
+                        returnStatus: true
+                    )
+
+                    echo "=== Archive Coverage Reports ==="
+
                     archiveArtifacts(
                         artifacts: 'coverage.txt,coverage.xml',
-                        allowEmptyArchive: true
+                        allowEmptyArchive: true,
+                        fingerprint: true
                     )
+
+                    if (testExit != 0) {
+                        error("PHPUnit atau pemeriksaan coverage gagal.")
+                    }
+
+                    echo "=== Test and Coverage Completed ==="
                 }
             }
         }
@@ -298,50 +311,64 @@ pipeline {
             }
 
             steps {
-                sh '''
-                    set -e
+                script {
 
-                    mkdir -p .trivy-cache || true
+                    int trivyExit = sh(
+                        script: '''
+                            set +e
 
-                    echo "======================================"
-                    echo "        TRIVY SECURITY SCAN"
-                    echo "======================================"
+                            mkdir -p .trivy-cache
 
-                    trivy --version
+                            echo "======================================"
+                            echo "        TRIVY SECURITY SCAN"
+                            echo "======================================"
 
-                    trivy fs \
-                        --cache-dir .trivy-cache \
-                        --scanners vuln \
-                        --severity HIGH,CRITICAL \
-                        --skip-dirs vendor \
-                        --skip-dirs node_modules \
-                        --skip-dirs coverage-html \
-                        --skip-dirs storage \
-                        --skip-dirs bootstrap/cache \
-                        --format sarif \
-                        --output trivy-results.sarif \
-                        --exit-code 1 \
-                        .
+                            trivy --version
 
-                    echo "=== Trivy Result ==="
+                            trivy fs \
+                                --cache-dir .trivy-cache \
+                                --scanners vuln \
+                                --severity HIGH,CRITICAL \
+                                --skip-dirs vendor \
+                                --skip-dirs node_modules \
+                                --skip-dirs coverage-html \
+                                --skip-dirs storage \
+                                --skip-dirs bootstrap/cache \
+                                --format sarif \
+                                --output trivy-results.sarif \
+                                --exit-code 1 \
+                                .
 
-                    ls -lh trivy-results.sarif
-                '''
-            }
+                            TRIVY_EXIT=$?
 
-            post {
-                always {
-                    recordIssues(
-                        enabledForFailure: true,
-                        failOnError: false,
-                        tools: [
-                            sarif(
-                                id: 'trivy',
-                                name: 'Trivy Security',
-                                pattern: 'trivy-results.sarif'
-                            )
-                        ]
+                            echo "=== Trivy Result ==="
+
+                            if [ -f trivy-results.sarif ]; then
+                                ls -lh trivy-results.sarif
+                            else
+                                echo "WARNING: trivy-results.sarif tidak ditemukan."
+                            fi
+
+                            exit "$TRIVY_EXIT"
+                        ''',
+                        returnStatus: true
                     )
+
+                    echo "=== Archive Trivy Report ==="
+
+                    archiveArtifacts(
+                        artifacts: 'trivy-results.sarif',
+                        allowEmptyArchive: true,
+                        fingerprint: true
+                    )
+
+                    if (trivyExit != 0) {
+                        error(
+                            "Trivy Security Scan gagal atau menemukan vulnerability HIGH/CRITICAL."
+                        )
+                    }
+
+                    echo "=== Trivy Security Scan Completed ==="
                 }
             }
         }
@@ -414,19 +441,18 @@ pipeline {
         // PUBLISH APPLICATION
         // ============================================================
         stage('Publish Application') {
-
             steps {
-
-                // Archive artifact ke Jenkins
-                archiveArtifacts(
-                    artifacts: 'latest-app.zip',
-                    fingerprint: true,
-                    allowEmptyArchive: false
-                )
 
                 script {
 
-                    // Identitas aplikasi
+                    echo "=== Archive Application Package ==="
+
+                    archiveArtifacts(
+                        artifacts: 'latest-app.zip',
+                        fingerprint: true,
+                        allowEmptyArchive: false
+                    )
+
                     def appName = env.JOB_NAME
                         .replaceAll('[^a-zA-Z0-9._-]', '-')
                         .replaceAll('-+', '-')
@@ -437,7 +463,6 @@ pipeline {
                     echo "Application Name: ${appName}"
                     echo "Build ID: ${buildId}"
 
-                    // Copy artifact ke Jenkins User Content
                     sh """
                         set -e
 
@@ -460,7 +485,6 @@ pipeline {
                             "/var/jenkins_home/userContent/applications/${appName}/${buildId}/latest-app.zip"
                     """
 
-                    // Buat public artifact URL
                     def jenkinsBaseUrl = env.BUILD_URL
                         .substring(0, env.BUILD_URL.indexOf('/job/'))
                         .replace('localhost', 'host.docker.internal')
@@ -482,7 +506,6 @@ pipeline {
         // DEPLOY APPLICATION
         // ============================================================
         stage('Deploy Application') {
-
             agent {
                 docker {
                     image 'curlimages/curl:8.15.0'
@@ -493,14 +516,12 @@ pipeline {
             steps {
                 script {
 
-                    // ==================================================
-                    // 1. VALIDATE DEPLOYMENT CONFIGURATION
-                    // ==================================================
-
                     echo ""
                     echo "=========================================="
                     echo "       START APPLICATION DEPLOYMENT"
                     echo "=========================================="
+
+                    // Validate deployment configuration
 
                     if (!env.DEPLOY_TOKEN?.trim()) {
                         error("DEPLOY_TOKEN belum dikonfigurasi di Jenkins!")
@@ -524,9 +545,7 @@ pipeline {
 
                     echo "Deployment configuration berhasil diperiksa."
 
-                    // ==================================================
-                    // 2. REQUEST REDEPLOYMENT
-                    // ==================================================
+                    // Request redeployment
 
                     echo ""
                     echo "=== Request Redeployment ==="
@@ -553,9 +572,7 @@ EOF
                     echo "Redeploy Response:"
                     echo redeployResponse
 
-                    // ==================================================
-                    // 3. POLLING DEPLOYMENT PROGRESS
-                    // ==================================================
+                    // Polling deployment progress
 
                     echo ""
                     echo "=== Waiting For Deployment ==="
@@ -601,7 +618,6 @@ EOF
                         echo "Progress Response:"
                         echo progressResponse
 
-                        // Parse JSON
                         def progressJson = readJSON(
                             text: progressResponse
                         )
@@ -619,6 +635,7 @@ EOF
                         echo "Deployment Status: ${deploymentStatus}"
 
                         // Deployment berhasil
+
                         if (deploymentStatus == 'SUCCESS') {
 
                             echo ""
@@ -630,6 +647,7 @@ EOF
                         }
 
                         // Deployment gagal
+
                         if (deploymentStatus == 'FAIL') {
 
                             echo ""
@@ -653,6 +671,7 @@ EOF
                         }
 
                         // Status tidak dikenal
+
                         if (deploymentStatus != 'IN_PROGRESS') {
                             error(
                                 "Status deployment tidak dikenal: " +
@@ -663,9 +682,7 @@ EOF
                         echo "Deployment masih berjalan..."
                     }
 
-                    // ==================================================
-                    // 4. DEPLOYMENT FINISHED
-                    // ==================================================
+                    // Deployment finished
 
                     echo ""
                     echo "=========================================="
@@ -683,13 +700,6 @@ EOF
     // POST ACTIONS
     // ================================================================
     post {
-
-        always {
-            archiveArtifacts(
-                artifacts: 'trivy-results.sarif',
-                allowEmptyArchive: true
-            )
-        }
 
         success {
             echo "=========================================="
