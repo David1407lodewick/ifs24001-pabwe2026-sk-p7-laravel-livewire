@@ -1,3 +1,4 @@
+
 <?php
 
 use App\Features\Admin\Livewire\AdminUserStockList;
@@ -22,44 +23,59 @@ Route::get('/', function () {
             : redirect()->route('stocks.index');
     }
 
-    return view('livewire.auth.login');
+    return redirect()->route('login');
 })->name('home');
 
 Route::middleware(['throttle:1000-per-second'])->group(function () {
 
-    // Guest Authentication Routes
+    // Halaman login dan register selalu dapat diakses publik
+    Route::get('/login', [AuthController::class, 'showLogin'])
+        ->name('login');
+
+    Route::get('/register', [AuthController::class, 'showRegister'])
+        ->name('register');
+
+    // Proses autentikasi hanya untuk pengguna yang belum login
     Route::middleware('guest')->group(function () {
-        Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
-        Route::post('/login', [AuthController::class, 'login'])->name('login.authenticate');
-        Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
-        Route::post('/register', [AuthController::class, 'register'])->name('register.store');
+        Route::post('/login', [AuthController::class, 'login'])
+            ->name('login.authenticate');
+
+        Route::post('/register', [AuthController::class, 'register'])
+            ->name('register.store');
     });
 
-    // Authenticated Routes
+    // Halaman yang membutuhkan autentikasi
     Route::middleware('auth')->group(function () {
+
         Route::post('/logout', function (Request $request) {
             Auth::logout();
+
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
             return redirect()->route('login');
         })->name('logout');
 
-        // Member Stock Routes protected by ownership middleware
         Route::get('/stocks', StockList::class)
             ->middleware('owns.stock')
             ->name('stocks.index');
+
         Route::get('/stocks/{stock}', StockDetail::class)
             ->middleware('owns.stock')
             ->name('stocks.show');
 
-        // User Profile Route
-        Route::get('/profile', Profile::class)->name('profile');
+        Route::get('/profile', Profile::class)
+            ->name('profile');
 
-        // Admin Routes protected by Role middleware
-        Route::prefix('admin')->name('admin.')->middleware('role:admin')->group(function () {
-            Route::get('/users', UserList::class)->name('users');
-            Route::get('/users/{user}/stocks', AdminUserStockList::class)->name('users.stocks');
-        });
+        Route::prefix('admin')
+            ->name('admin.')
+            ->middleware('role:admin')
+            ->group(function () {
+                Route::get('/users', UserList::class)
+                    ->name('users');
+
+                Route::get('/users/{user}/stocks', AdminUserStockList::class)
+                    ->name('users.stocks');
+            });
     });
 });
