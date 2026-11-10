@@ -12,6 +12,8 @@ pipeline {
     environment {
         COMPOSER_ALLOW_SUPERUSER = '1'
         COMPOSER_NO_INTERACTION = '1'
+        DEPLOY_TOKEN = credentials('DEPLOY_TOKEN')
+        WEBSITE_ID = credentials('WEBSITE_ID')
     }
 
     stages {
@@ -636,6 +638,23 @@ pipeline {
                         // ==================================================
 
                         echo "Deployment masih berjalan..."
+
+
+                        // ==========================================
+                        // VALIDATE DEPLOYMENT CREDENTIALS
+                        // ==========================================
+
+                        if [ -z "$DEPLOY_TOKEN" ]; then
+                            echo "ERROR: DEPLOY_TOKEN belum dikonfigurasi!"
+                            exit 1
+                        fi
+
+                        if [ -z "$WEBSITE_ID" ]; then
+                            echo "ERROR: WEBSITE_ID belum dikonfigurasi!"
+                            exit 1
+                        fi
+
+                        echo "Deployment credentials berhasil ditemukan."
                     }
 
                     echo ""
