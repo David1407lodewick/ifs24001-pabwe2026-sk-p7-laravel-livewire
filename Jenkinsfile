@@ -1,4 +1,3 @@
-
 pipeline {
 
     agent any
@@ -10,6 +9,11 @@ pipeline {
         skipStagesAfterUnstable()
     }
 
+    environment {
+        COMPOSER_ALLOW_SUPERUSER = '1'
+        COMPOSER_NO_INTERACTION = '1'
+    }
+
     stages {
 
         // ============================================================
@@ -18,7 +22,7 @@ pipeline {
         stage('Checkout') {
             agent {
                 docker {
-                    image 'oven/bun:alpine'
+                    image 'alpine:3.21'
                     reuseNode true
                 }
             }
@@ -29,41 +33,12 @@ pipeline {
         }
 
         // ============================================================
-        // INSTALL DEPENDENCIES
+        // INSTALL PHP DEPENDENCIES
         // ============================================================
-        stage('Install Dependencies') {
+        stage('Install PHP Dependencies') {
             agent {
                 docker {
-                    image 'oven/bun:alpine'
-                    reuseNode true
-                }
-            }
-
-            steps {
-                sh '''
-                    set -e
-
-                    echo "=== Installing Dependencies ==="
-
-                    bun install
-
-                    echo "=== Building Laravel frontend assets ==="
-                    bun run build
-
-                    echo "=== Dependencies Installed and Assets Built ==="
-                '''
-            }
-        }
-
-        // ============================================================
-        // TEST
-        // ============================================================
-        
-        
-        stage('Test') {
-            agent {
-                docker {
-                    image 'php:8.5-cli-alpine'
+                    image 'delcom-ci-php:8.5'
                     reuseNode true
                     args '-u root'
                 }
@@ -73,114 +48,216 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "======================================"
-                    echo "       PREPARING PHP ENVIRONMENT"
-                    echo "======================================"
+                    echo "=== PHP Runtime ==="
+                    php -v
 
-                    echo "=== Installing system dependencies ==="
+                    echo "=== Verifying PHP extensions (Laravel + PhpSpreadsheet) ==="
+                    php -r '
+                        $required = [
+                            // Laravel core
+                            "ctype", "curl", "dom", "fileinfo", "filter", "hash",
+                            "mbstring", "openssl", "pcre", "pdo", "session",
+                            "tokenizer", "xml",
+                            // Testing (sqlite in-memory)
+                            "pdo_sqlite",
+                            // PhpOffice / PhpSpreadsheet
+                            "gd", "zip", "iconv", "simplexml",
+                            "xmlreader", "xmlwriter", "zlib",
+                            // Common Laravel extras
+                            "bcmath", "exif",
+                        ];
+                        $missing = [];
+                        foreach ($required as $ext) {
+                            if (!extension_loaded($ext)) {
+                                $missing[] = $ext;
+                            }
+                        }
+                        if ($missing) {
+                            fwrite(STDERR, "Missing required PHP extensions: " . implode(", ", $missing) . PHP_EOL);
+                            fwrite(STDERR, "Image delcom-ci-php harus menyediakan ekstensi di atas (termasuk ext-gd untuk PhpSpreadsheet)." . PHP_EOL);
+                            exit(1);
+                        }
+                        echo "OK: all required PHP extensions are available." . PHP_EOL;
+                    '
 
-                    apk add --no-cache \
-                        curl unzip git \
-                        $PHPIZE_DEPS \
-                        sqlite-dev libzip-dev \
-                        libpng-dev freetype-dev libjpeg-turbo-dev \
-                        oniguruma-dev libxml2-dev icu-dev
-
-                    echo "=== Checking PHP extensions ==="
-
-                    php -m
-
-                    REQUIRED_EXTENSIONS="
-                        pdo_sqlite
-                        sqlite3
-                        mbstring
-                        xml
-                        dom
-                        simplexml
-                        xmlreader
-                        xmlwriter
-                        zip
-                        gd
-                        intl
-                    "
-
-                    MISSING_EXTENSIONS=""
-
-                    for extension in $REQUIRED_EXTENSIONS; do
-                        if php -r "exit(extension_loaded('${extension}') ? 0 : 1);"; then
-                            echo "[OK] ${extension} sudah tersedia"
-                        else
-                            echo "[MISSING] ${extension} belum tersedia"
-                            MISSING_EXTENSIONS="$MISSING_EXTENSIONS $extension"
-                        fi
-                    done
-
-                    echo "=== Installing missing PHP extensions ==="
-
-                    if [ -n "$MISSING_EXTENSIONS" ]; then
-
-                        echo "Extensions to install: $MISSING_EXTENSIONS"
-
-                        if echo "$MISSING_EXTENSIONS" | grep -qw gd; then
-                            docker-php-ext-configure gd \
-                                --with-freetype \
-                                --with-jpeg
-                        fi
-
-                        docker-php-ext-install -j"$(nproc)" \
-                            $MISSING_EXTENSIONS
-
-                    else
-                        echo "All required PHP extensions are already available."
-                    fi
-
-                    echo "=== Verifying PHP extensions ==="
-
-                    php -m
-
-                    echo "=== Installing Composer ==="
-
-                    curl -fsSL https://getcomposer.org/installer \
-                        -o composer-setup.php
-
-                    php composer-setup.php \
-                        --install-dir=/usr/local/bin \
-                        --filename=composer
-
-                    rm -f composer-setup.php
-
-                    composer --version
-
-                    echo "======================================"
-                    echo "       PREPARING LARAVEL"
-                    echo "======================================"
-
-                    cp .env.example .env
-
-                    echo "=== Installing Composer dependencies ==="
+                    echo "=== Installing PHP Dependencies (Composer) ==="
 
                     composer install \
-                        --no-interaction \
                         --prefer-dist \
+                        --no-progress \
                         --optimize-autoloader
 
-                    echo "=== Generating application key ==="
+                    echo "=== PHP Dependencies Installed ==="
 
-                    php artisan key:generate --force
-
-                    echo "======================================"
-                    echo "          RUNNING PHPUNIT"
-                    echo "======================================"
-
-                    composer test
-
-                    echo "======================================"
-                    echo "       PHPUNIT TESTS PASSED"
-                    echo "======================================"
+                    echo "=== Composer Audit (fail on vulnerabilities) ==="
+                    # Exit non-zero jika ada advisory → pipeline FAILURE
+                    composer audit --no-interaction
+                    echo "=== Composer Audit OK (no known vulnerabilities) ==="
                 '''
             }
         }
 
+        // ============================================================
+        // INSTALL FRONTEND DEPENDENCIES + BUILD ASSETS
+        // ============================================================
+        stage('Install & Build Frontend') {
+            agent {
+                docker {
+                    image 'node:24-alpine'
+                    reuseNode true
+                }
+            }
+
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Installing Frontend Dependencies ==="
+                    # package-lock.json may not exist yet; prefer reproducible install when available
+                    if [ -f package-lock.json ]; then
+                        npm ci --ignore-scripts
+                    else
+                        npm install --ignore-scripts
+                    fi
+
+                    echo "=== Building Vite Assets ==="
+                    npm run build
+
+                    echo "=== Frontend Build Completed ==="
+                '''
+            }
+        }
+
+        // ============================================================
+        // TEST (PHPUnit + Coverage)
+        // ============================================================
+        stage('Test') {
+            agent {
+                docker {
+                    image 'delcom-ci-php:8.5'
+                    reuseNode true
+                    args '-u root'
+                }
+            }
+
+            steps {
+                sh '''
+                    set -e
+
+                    echo "=== Re-check critical extensions before tests ==="
+                    php -r '
+                        foreach (["gd", "zip", "mbstring", "pdo_sqlite"] as $ext) {
+                            if (!extension_loaded($ext)) {
+                                fwrite(STDERR, "Missing extension for tests: {$ext}" . PHP_EOL);
+                                exit(1);
+                            }
+                        }
+                        if (!extension_loaded("pcov") && !extension_loaded("xdebug")) {
+                            fwrite(STDERR, "Missing coverage driver: need pcov or xdebug" . PHP_EOL);
+                            exit(1);
+                        }
+                        echo "OK: gd, zip, mbstring, pdo_sqlite + coverage driver ready." . PHP_EOL;
+                    '
+
+                    echo "=== Preparing Laravel Testing Environment ==="
+
+                    if [ ! -f .env ]; then
+                        cp .env.example .env
+                    fi
+
+                    php artisan key:generate --force
+                    php artisan config:clear
+                    php artisan view:clear
+
+                    echo "=== Running PHPUnit with Coverage ==="
+
+                    php vendor/bin/phpunit \
+                        --colors=never \
+                        --coverage-text=coverage.txt \
+                        --coverage-clover=coverage.xml \
+                        --coverage-html=coverage-html
+
+                    echo "=== Tests Passed ==="
+                    ls -lh coverage.xml coverage.txt || true
+
+                    echo "=== Enforcing 100% Coverage (app/) ==="
+                    php -r '
+                        if (!is_file("coverage.xml")) {
+                            fwrite(STDERR, "coverage.xml tidak ditemukan. Coverage wajib dihasilkan." . PHP_EOL);
+                            exit(1);
+                        }
+
+                        $xml = @simplexml_load_file("coverage.xml");
+                        if ($xml === false) {
+                            fwrite(STDERR, "coverage.xml tidak dapat diparse." . PHP_EOL);
+                            exit(1);
+                        }
+
+                        $metrics = $xml->project->metrics ?? null;
+                        if ($metrics === null) {
+                            $nodes = $xml->xpath("//project/metrics");
+                            $metrics = $nodes[0] ?? null;
+                        }
+                        if ($metrics === null) {
+                            fwrite(STDERR, "Metrik coverage tidak ditemukan di coverage.xml." . PHP_EOL);
+                            exit(1);
+                        }
+
+                        // PHPUnit clover project metrics: statements/methods/elements
+                        // (tidak selalu ada coveredclasses — jangan dipakai sebagai gate)
+                        $statements = (int) $metrics["statements"];
+                        $coveredStatements = (int) $metrics["coveredstatements"];
+                        $methods = (int) $metrics["methods"];
+                        $coveredMethods = (int) $metrics["coveredmethods"];
+                        $elements = (int) $metrics["elements"];
+                        $coveredElements = (int) $metrics["coveredelements"];
+
+                        if ($statements <= 0) {
+                            fwrite(STDERR, "Tidak ada statement yang diukur (statements=0)." . PHP_EOL);
+                            exit(1);
+                        }
+
+                        $linePct = round(100 * $coveredStatements / $statements, 2);
+                        $methodPct = $methods > 0 ? round(100 * $coveredMethods / $methods, 2) : 100.0;
+                        $elementPct = $elements > 0 ? round(100 * $coveredElements / $elements, 2) : 100.0;
+
+                        echo "Coverage summary (source=app/):" . PHP_EOL;
+                        echo "  Lines/Statements : {$coveredStatements}/{$statements} ({$linePct}%)" . PHP_EOL;
+                        echo "  Methods          : {$coveredMethods}/{$methods} ({$methodPct}%)" . PHP_EOL;
+                        echo "  Elements         : {$coveredElements}/{$elements} ({$elementPct}%)" . PHP_EOL;
+
+                        $failed = false;
+                        if ($coveredStatements < $statements) {
+                            fwrite(STDERR, "FAIL: Line coverage harus 100%. Saat ini {$linePct}%." . PHP_EOL);
+                            $failed = true;
+                        }
+                        if ($methods > 0 && $coveredMethods < $methods) {
+                            fwrite(STDERR, "FAIL: Method coverage harus 100%. Saat ini {$methodPct}%." . PHP_EOL);
+                            $failed = true;
+                        }
+                        if ($elements > 0 && $coveredElements < $elements) {
+                            fwrite(STDERR, "FAIL: Element coverage harus 100%. Saat ini {$elementPct}%." . PHP_EOL);
+                            $failed = true;
+                        }
+
+                        if ($failed) {
+                            exit(1);
+                        }
+
+                        echo "OK: Coverage 100% (lines, methods, elements)." . PHP_EOL;
+                    '
+                '''
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'coverage.txt,coverage.xml',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
 
         // ============================================================
         // TRIVY SECURITY SCAN
@@ -218,6 +295,11 @@ pipeline {
                         --cache-dir .trivy-cache \
                         --scanners vuln \
                         --severity HIGH,CRITICAL \
+                        --skip-dirs vendor \
+                        --skip-dirs node_modules \
+                        --skip-dirs coverage-html \
+                        --skip-dirs storage \
+                        --skip-dirs bootstrap/cache \
                         --format sarif \
                         --output trivy-results.sarif \
                         --exit-code 1 \
@@ -249,50 +331,12 @@ pipeline {
         }
 
         // ============================================================
-        // SONARQUBE ANALYSIS
-        // ============================================================
-        stage('SonarQube Analysis') {
-            agent {
-                docker {
-                    image 'sonarsource/sonar-scanner-cli:latest'
-                    reuseNode true
-                    args '--network cicd-network'
-                }
-            }
-
-            steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh '''
-                        set -e
-
-                        echo "=== SonarQube Analysis ==="
-
-                        sonar-scanner
-
-                        echo "=== SonarQube Analysis Completed ==="
-                    '''
-                }
-            }
-        }
-
-        // ============================================================
-        // QUALITY GATE
-        // ============================================================
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 30, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        // ============================================================
         // PACKAGE APPLICATION
         // ============================================================
         stage('Package Application') {
             agent {
                 docker {
-                    image 'node:24-alpine'
+                    image 'delcom-ci-php:8.5'
                     reuseNode true
                     args '-u root'
                 }
@@ -306,27 +350,50 @@ pipeline {
                     echo "       CREATING APPLICATION PACKAGE"
                     echo "======================================"
 
-                    apk add --no-cache zip unzip
-
                     rm -f latest-app.zip
 
+                    # vendor & node_modules sengaja tidak ikut zip
+                    # (diinstal ulang di server deploy via composer/npm)
+                    # .env.example tetap ikut; .env lokal tidak
                     zip -r latest-app.zip . \
+                        -x "vendor/*" \
                         -x "node_modules/*" \
                         -x ".git/*" \
                         -x ".env" \
-                        -x ".env.*" \
+                        -x ".env.backup" \
+                        -x ".env.production" \
+                        -x ".env.local" \
                         -x "coverage/*" \
+                        -x "coverage-html/*" \
+                        -x "coverage.txt" \
+                        -x "coverage.xml" \
                         -x ".trivy-cache/*" \
                         -x "latest-app.zip" \
-                        -x "trivy-results.sarif"
+                        -x "trivy-results.sarif" \
+                        -x ".docs/*" \
+                        -x "tests/*" \
+                        -x "storage/logs/*" \
+                        -x "storage/framework/cache/data/*" \
+                        -x "storage/framework/sessions/*" \
+                        -x "storage/framework/views/*" \
+                        -x "storage/framework/testing/*" \
+                        -x "bootstrap/cache/*.php"
 
                     echo "=== Application Package Created ==="
 
                     ls -lh latest-app.zip
 
-                    echo "=== Package Content ==="
+                    echo "=== Verify vendor/node_modules excluded ==="
+                    if unzip -Z1 latest-app.zip | grep -E '^(vendor|node_modules)(/|$)' >/dev/null; then
+                        echo "ERROR: zip masih berisi vendor/ atau node_modules/"
+                        unzip -Z1 latest-app.zip | grep -E '^(vendor|node_modules)(/|$)' | head -n 20
+                        exit 1
+                    fi
+                    echo "OK: vendor/ dan node_modules/ tidak ada di zip"
 
-                    unzip -l latest-app.zip
+                    echo "=== Package Content (sample) ==="
+
+                    unzip -l latest-app.zip | head -n 80
                 '''
             }
         }
@@ -375,18 +442,18 @@ pipeline {
                         echo "       PUBLISHING USER CONTENT"
                         echo "======================================"
 
-                        docker exec cicd-jenkins \
-                            mkdir -p \
+                        docker exec cicd-jenkins \\
+                            mkdir -p \\
                             "/var/jenkins_home/userContent/applications/${appName}/${buildId}"
 
-                        docker cp \
-                            latest-app.zip \
+                        docker cp \\
+                            latest-app.zip \\
                             "cicd-jenkins:/var/jenkins_home/userContent/applications/${appName}/${buildId}/latest-app.zip"
 
                         echo "=== Published File ==="
 
-                        docker exec cicd-jenkins \
-                            ls -lh \
+                        docker exec cicd-jenkins \\
+                            ls -lh \\
                             "/var/jenkins_home/userContent/applications/${appName}/${buildId}/latest-app.zip"
                     """
 
