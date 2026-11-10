@@ -73,6 +73,13 @@ pipeline {
                 sh '''
                     set -e
 
+                        git config --global --add safe.directory "$WORKSPACE"
+
+                        echo "=== Installing Composer dependencies ==="
+                    com
+                    '''
+                    set -e
+
                     echo "======================================"
                     echo "       PREPARING PHP ENVIRONMENT"
                     echo "======================================"
