@@ -1,3 +1,4 @@
+
 pipeline {
 
     agent any
@@ -5,13 +6,13 @@ pipeline {
     options {
         timestamps()
         skipDefaultCheckout(true)
-        // Stop later stages if a publisher marks the build UNSTABLE/FAILURE mid-run
         skipStagesAfterUnstable()
     }
 
     environment {
         COMPOSER_ALLOW_SUPERUSER = '1'
         COMPOSER_NO_INTERACTION = '1'
+
         DEPLOY_TOKEN = credentials('DEPLOY_TOKEN')
         WEBSITE_ID = credentials('WEBSITE_ID')
     }
@@ -53,36 +54,40 @@ pipeline {
                     echo "=== PHP Runtime ==="
                     php -v
 
-                    echo "=== Verifying PHP extensions (Laravel + PhpSpreadsheet) ==="
+                    echo "=== Verifying PHP extensions ==="
+
                     php -r '
                         $required = [
-                            // Laravel core
                             "ctype", "curl", "dom", "fileinfo", "filter", "hash",
                             "mbstring", "openssl", "pcre", "pdo", "session",
                             "tokenizer", "xml",
-                            // Testing (sqlite in-memory)
                             "pdo_sqlite",
-                            // PhpOffice / PhpSpreadsheet
                             "gd", "zip", "iconv", "simplexml",
                             "xmlreader", "xmlwriter", "zlib",
-                            // Common Laravel extras
                             "bcmath", "exif",
                         ];
+
                         $missing = [];
+
                         foreach ($required as $ext) {
                             if (!extension_loaded($ext)) {
                                 $missing[] = $ext;
                             }
                         }
+
                         if ($missing) {
-                            fwrite(STDERR, "Missing required PHP extensions: " . implode(", ", $missing) . PHP_EOL);
-                            fwrite(STDERR, "Image delcom-ci-php harus menyediakan ekstensi di atas (termasuk ext-gd untuk PhpSpreadsheet)." . PHP_EOL);
+                            fwrite(
+                                STDERR,
+                                "Missing PHP extensions: " .
+                                implode(", ", $missing) . PHP_EOL
+                            );
                             exit(1);
                         }
+
                         echo "OK: all required PHP extensions are available." . PHP_EOL;
                     '
 
-                    echo "=== Installing PHP Dependencies (Composer) ==="
+                    echo "=== Installing PHP Dependencies ==="
 
                     composer install \
                         --prefer-dist \
@@ -91,10 +96,11 @@ pipeline {
 
                     echo "=== PHP Dependencies Installed ==="
 
-                    echo "=== Composer Audit (fail on vulnerabilities) ==="
-                    # Exit non-zero jika ada advisory → pipeline FAILURE
+                    echo "=== Composer Audit ==="
+
                     composer audit --no-interaction
-                    echo "=== Composer Audit OK (no known vulnerabilities) ==="
+
+                    echo "=== Composer Audit OK ==="
                 '''
             }
         }
@@ -115,7 +121,7 @@ pipeline {
                     set -e
 
                     echo "=== Installing Frontend Dependencies ==="
-                    # package-lock.json may not exist yet; prefer reproducible install when available
+
                     if [ -f package-lock.json ]; then
                         npm ci --ignore-scripts
                     else
@@ -123,6 +129,7 @@ pipeline {
                     fi
 
                     echo "=== Building Vite Assets ==="
+
                     npm run build
 
                     echo "=== Frontend Build Completed ==="
@@ -131,7 +138,7 @@ pipeline {
         }
 
         // ============================================================
-        // TEST (PHPUnit + Coverage)
+        // TEST (PHPUNIT + COVERAGE)
         // ============================================================
         stage('Test') {
             agent {
@@ -146,19 +153,22 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "=== Re-check critical extensions before tests ==="
+                    echo "=== Re-check critical extensions ==="
+
                     php -r '
                         foreach (["gd", "zip", "mbstring", "pdo_sqlite"] as $ext) {
                             if (!extension_loaded($ext)) {
-                                fwrite(STDERR, "Missing extension for tests: {$ext}" . PHP_EOL);
+                                fwrite(STDERR, "Missing extension: {$ext}" . PHP_EOL);
                                 exit(1);
                             }
                         }
+
                         if (!extension_loaded("pcov") && !extension_loaded("xdebug")) {
                             fwrite(STDERR, "Missing coverage driver: need pcov or xdebug" . PHP_EOL);
                             exit(1);
                         }
-                        echo "OK: gd, zip, mbstring, pdo_sqlite + coverage driver ready." . PHP_EOL;
+
+                        echo "OK: PHP extensions and coverage driver ready." . PHP_EOL;
                     '
 
                     echo "=== Preparing Laravel Testing Environment ==="
@@ -180,33 +190,36 @@ pipeline {
                         --coverage-html=coverage-html
 
                     echo "=== Tests Passed ==="
+
                     ls -lh coverage.xml coverage.txt || true
 
-                    echo "=== Enforcing 100% Coverage (app/) ==="
+                    echo "=== Enforcing 100% Coverage ==="
+
                     php -r '
                         if (!is_file("coverage.xml")) {
-                            fwrite(STDERR, "coverage.xml tidak ditemukan. Coverage wajib dihasilkan." . PHP_EOL);
+                            fwrite(STDERR, "coverage.xml tidak ditemukan." . PHP_EOL);
                             exit(1);
                         }
 
                         $xml = @simplexml_load_file("coverage.xml");
+
                         if ($xml === false) {
                             fwrite(STDERR, "coverage.xml tidak dapat diparse." . PHP_EOL);
                             exit(1);
                         }
 
                         $metrics = $xml->project->metrics ?? null;
+
                         if ($metrics === null) {
                             $nodes = $xml->xpath("//project/metrics");
                             $metrics = $nodes[0] ?? null;
                         }
+
                         if ($metrics === null) {
-                            fwrite(STDERR, "Metrik coverage tidak ditemukan di coverage.xml." . PHP_EOL);
+                            fwrite(STDERR, "Metrik coverage tidak ditemukan." . PHP_EOL);
                             exit(1);
                         }
 
-                        // PHPUnit clover project metrics: statements/methods/elements
-                        // (tidak selalu ada coveredclasses — jangan dipakai sebagai gate)
                         $statements = (int) $metrics["statements"];
                         $coveredStatements = (int) $metrics["coveredstatements"];
                         $methods = (int) $metrics["methods"];
@@ -215,30 +228,37 @@ pipeline {
                         $coveredElements = (int) $metrics["coveredelements"];
 
                         if ($statements <= 0) {
-                            fwrite(STDERR, "Tidak ada statement yang diukur (statements=0)." . PHP_EOL);
+                            fwrite(STDERR, "Tidak ada statement yang diukur." . PHP_EOL);
                             exit(1);
                         }
 
                         $linePct = round(100 * $coveredStatements / $statements, 2);
-                        $methodPct = $methods > 0 ? round(100 * $coveredMethods / $methods, 2) : 100.0;
-                        $elementPct = $elements > 0 ? round(100 * $coveredElements / $elements, 2) : 100.0;
+                        $methodPct = $methods > 0
+                            ? round(100 * $coveredMethods / $methods, 2)
+                            : 100.0;
+                        $elementPct = $elements > 0
+                            ? round(100 * $coveredElements / $elements, 2)
+                            : 100.0;
 
                         echo "Coverage summary (source=app/):" . PHP_EOL;
-                        echo "  Lines/Statements : {$coveredStatements}/{$statements} ({$linePct}%)" . PHP_EOL;
-                        echo "  Methods          : {$coveredMethods}/{$methods} ({$methodPct}%)" . PHP_EOL;
-                        echo "  Elements         : {$coveredElements}/{$elements} ({$elementPct}%)" . PHP_EOL;
+                        echo "Lines/Statements: {$coveredStatements}/{$statements} ({$linePct}%)" . PHP_EOL;
+                        echo "Methods: {$coveredMethods}/{$methods} ({$methodPct}%)" . PHP_EOL;
+                        echo "Elements: {$coveredElements}/{$elements} ({$elementPct}%)" . PHP_EOL;
 
                         $failed = false;
+
                         if ($coveredStatements < $statements) {
-                            fwrite(STDERR, "FAIL: Line coverage harus 100%. Saat ini {$linePct}%." . PHP_EOL);
+                            fwrite(STDERR, "FAIL: Line coverage harus 100%." . PHP_EOL);
                             $failed = true;
                         }
+
                         if ($methods > 0 && $coveredMethods < $methods) {
-                            fwrite(STDERR, "FAIL: Method coverage harus 100%. Saat ini {$methodPct}%." . PHP_EOL);
+                            fwrite(STDERR, "FAIL: Method coverage harus 100%." . PHP_EOL);
                             $failed = true;
                         }
+
                         if ($elements > 0 && $coveredElements < $elements) {
-                            fwrite(STDERR, "FAIL: Element coverage harus 100%. Saat ini {$elementPct}%." . PHP_EOL);
+                            fwrite(STDERR, "FAIL: Element coverage harus 100%." . PHP_EOL);
                             $failed = true;
                         }
 
@@ -246,7 +266,7 @@ pipeline {
                             exit(1);
                         }
 
-                        echo "OK: Coverage 100% (lines, methods, elements)." . PHP_EOL;
+                        echo "OK: Coverage 100%." . PHP_EOL;
                     '
                 '''
             }
@@ -269,7 +289,6 @@ pipeline {
                 docker {
                     image 'aquasec/trivy:0.74.0'
                     reuseNode true
-
                     args '''
                         --entrypoint=""
                         -e HOME=/tmp
@@ -288,10 +307,7 @@ pipeline {
                     echo "        TRIVY SECURITY SCAN"
                     echo "======================================"
 
-                    echo "=== Trivy Version ==="
                     trivy --version
-
-                    echo "=== Trivy Scan ==="
 
                     trivy fs \
                         --cache-dir .trivy-cache \
@@ -308,15 +324,13 @@ pipeline {
                         .
 
                     echo "=== Trivy Result ==="
+
                     ls -lh trivy-results.sarif
                 '''
             }
 
             post {
                 always {
-                    // failOnError must be false: otherwise Warnings NG can mark the
-                    // whole build FAILURE while later stages still run (all green, badge red).
-                    // Build failure on HIGH/CRITICAL comes from trivy --exit-code 1 above.
                     recordIssues(
                         enabledForFailure: true,
                         failOnError: false,
@@ -354,9 +368,6 @@ pipeline {
 
                     rm -f latest-app.zip
 
-                    # vendor & node_modules sengaja tidak ikut zip
-                    # (diinstal ulang di server deploy via composer/npm)
-                    # .env.example tetap ikut; .env lokal tidak
                     zip -r latest-app.zip . \
                         -x "vendor/*" \
                         -x "node_modules/*" \
@@ -386,14 +397,13 @@ pipeline {
                     ls -lh latest-app.zip
 
                     echo "=== Verify vendor/node_modules excluded ==="
+
                     if unzip -Z1 latest-app.zip | grep -E '^(vendor|node_modules)(/|$)' >/dev/null; then
                         echo "ERROR: zip masih berisi vendor/ atau node_modules/"
-                        unzip -Z1 latest-app.zip | grep -E '^(vendor|node_modules)(/|$)' | head -n 20
                         exit 1
                     fi
-                    echo "OK: vendor/ dan node_modules/ tidak ada di zip"
 
-                    echo "=== Package Content (sample) ==="
+                    echo "OK: vendor/ dan node_modules/ tidak ada di zip"
 
                     unzip -l latest-app.zip | head -n 80
                 '''
@@ -407,10 +417,7 @@ pipeline {
 
             steps {
 
-                // ========================================================
-                // 1. ARCHIVE ARTIFACT KE JENKINS
-                // ========================================================
-
+                // Archive artifact ke Jenkins
                 archiveArtifacts(
                     artifacts: 'latest-app.zip',
                     fingerprint: true,
@@ -419,10 +426,7 @@ pipeline {
 
                 script {
 
-                    // ====================================================
-                    // 2. BUAT IDENTITAS APPLICATION
-                    // ====================================================
-
+                    // Identitas aplikasi
                     def appName = env.JOB_NAME
                         .replaceAll('[^a-zA-Z0-9._-]', '-')
                         .replaceAll('-+', '-')
@@ -433,10 +437,7 @@ pipeline {
                     echo "Application Name: ${appName}"
                     echo "Build ID: ${buildId}"
 
-                    // ====================================================
-                    // 3. COPY KE USER CONTENT
-                    // ====================================================
-
+                    // Copy artifact ke Jenkins User Content
                     sh """
                         set -e
 
@@ -444,25 +445,22 @@ pipeline {
                         echo "       PUBLISHING USER CONTENT"
                         echo "======================================"
 
-                        docker exec cicd-jenkins \\
-                            mkdir -p \\
+                        docker exec cicd-jenkins \
+                            mkdir -p \
                             "/var/jenkins_home/userContent/applications/${appName}/${buildId}"
 
-                        docker cp \\
-                            latest-app.zip \\
+                        docker cp \
+                            latest-app.zip \
                             "cicd-jenkins:/var/jenkins_home/userContent/applications/${appName}/${buildId}/latest-app.zip"
 
                         echo "=== Published File ==="
 
-                        docker exec cicd-jenkins \\
-                            ls -lh \\
+                        docker exec cicd-jenkins \
+                            ls -lh \
                             "/var/jenkins_home/userContent/applications/${appName}/${buildId}/latest-app.zip"
                     """
 
-                    // ====================================================
-                    // 4. BUAT PUBLIC ARTIFACT URL
-                    // ====================================================
-
+                    // Buat public artifact URL
                     def jenkinsBaseUrl = env.BUILD_URL
                         .substring(0, env.BUILD_URL.indexOf('/job/'))
                         .replace('localhost', 'host.docker.internal')
@@ -483,41 +481,51 @@ pipeline {
         // ============================================================
         // DEPLOY APPLICATION
         // ============================================================
-       stage('Deploy Application'){
-                        agent {
-                            docker {
-                                image 'curlimages/curl:8.15.0'
-                                reuseNode true
-                            }
-                        }
+        stage('Deploy Application') {
 
-                        steps {
-                            sh '''
-                                set -e
+            agent {
+                docker {
+                    image 'curlimages/curl:8.15.0'
+                    reuseNode true
+                }
+            }
 
-                                echo "=========================================="
-                                echo "       START APPLICATION DEPLOYMENT"
-                                echo "=========================================="
-
-                                # VALIDATE DEPLOYMENT CREDENTIALS
-
-                                if [ -z "$DEPLOY_TOKEN" ]; then
-                                    echo "ERROR: DEPLOY_TOKEN belum dikonfigurasi!"
-                                    exit 1
-                                fi
-
-                                if [ -z "$WEBSITE_ID" ]; then
-                                    echo "ERROR: WEBSITE_ID belum dikonfigurasi!"
-                                    exit 1
-                                fi
-
-                                echo "Deployment credentials berhasil ditemukan."
-                            }
-                        }
-
+            steps {
+                script {
 
                     // ==================================================
-                    // 1. REQUEST REDEPLOYMENT
+                    // 1. VALIDATE DEPLOYMENT CONFIGURATION
+                    // ==================================================
+
+                    echo ""
+                    echo "=========================================="
+                    echo "       START APPLICATION DEPLOYMENT"
+                    echo "=========================================="
+
+                    if (!env.DEPLOY_TOKEN?.trim()) {
+                        error("DEPLOY_TOKEN belum dikonfigurasi di Jenkins!")
+                    }
+
+                    if (!env.WEBSITE_ID?.trim()) {
+                        error("WEBSITE_ID belum dikonfigurasi di Jenkins!")
+                    }
+
+                    if (!env.URL_REDEPLOY?.trim()) {
+                        error("URL_REDEPLOY belum dikonfigurasi!")
+                    }
+
+                    if (!env.URL_PROGRESS?.trim()) {
+                        error("URL_PROGRESS belum dikonfigurasi!")
+                    }
+
+                    if (!env.ARTIFACT_URL?.trim()) {
+                        error("ARTIFACT_URL belum tersedia!")
+                    }
+
+                    echo "Deployment configuration berhasil diperiksa."
+
+                    // ==================================================
+                    // 2. REQUEST REDEPLOYMENT
                     // ==================================================
 
                     echo ""
@@ -530,95 +538,75 @@ pipeline {
                             curl -sS --fail-with-body \
                                 -X POST "$URL_REDEPLOY" \
                                 -H "Content-Type: application/json" \
-                                -d "{
-                                    \\"token_access\\": \\"$DEPLOY_TOKEN\\",
-                                    \\"website_id\\": \\"$WEBSITE_ID\\",
-                                    \\"source_url\\": \\"$ARTIFACT_URL\\",
-                                    \\"source_type\\": \\"jenkins\\"
-                                }"
+                                --data-binary @- <<EOF
+{
+    "token_access": "$DEPLOY_TOKEN",
+    "website_id": "$WEBSITE_ID",
+    "source_url": "$ARTIFACT_URL",
+    "source_type": "jenkins"
+}
+EOF
                         ''',
                         returnStdout: true
                     ).trim()
 
                     echo "Redeploy Response:"
                     echo redeployResponse
-                        // ==================================================
-                        // 2. POLLING DEPLOYMENT PROGRESS
-                        // ==================================================
+
+                    // ==================================================
+                    // 3. POLLING DEPLOYMENT PROGRESS
+                    // ==================================================
+
+                    echo ""
+                    echo "=== Waiting For Deployment ==="
+
+                    def maxAttempts = 120
+                    def attempt = 0
+                    def deploymentStatus = 'IN_PROGRESS'
+
+                    while (deploymentStatus == 'IN_PROGRESS') {
+
+                        attempt++
+
+                        if (attempt > maxAttempts) {
+                            error(
+                                "Deployment timeout. " +
+                                "Status masih IN_PROGRESS setelah " +
+                                "${maxAttempts} attempts."
+                            )
+                        }
+
+                        sleep time: 5, unit: 'SECONDS'
 
                         echo ""
-                        echo "=== Waiting For Deployment ==="
+                        echo "=== Checking Deployment Progress (${attempt}/${maxAttempts}) ==="
 
-                        // Validasi credentials sebelum polling
-                        if (!env.DEPLOY_TOKEN?.trim()) {
-                            error("DEPLOY_TOKEN belum dikonfigurasi di Jenkins!")
-                        }
+                        def progressResponse = sh(
+                            script: '''
+                                set -e
 
-                        if (!env.WEBSITE_ID?.trim()) {
-                            error("WEBSITE_ID belum dikonfigurasi di Jenkins!")
-                        }
+                                curl -sS --fail-with-body \
+                                    -X POST "$URL_PROGRESS" \
+                                    -H "Content-Type: application/json" \
+                                    --data-binary @- <<EOF
+{
+    "token_access": "$DEPLOY_TOKEN",
+    "website_id": "$WEBSITE_ID"
+}
+EOF
+                            ''',
+                            returnStdout: true
+                        ).trim()
 
-                        def maxAttempts = 120
-                        def attempt = 0
-                        def deploymentStatus = 'IN_PROGRESS'
+                        echo "Progress Response:"
+                        echo progressResponse
 
-                        while (deploymentStatus == 'IN_PROGRESS') {
+                        // Parse JSON
+                        def progressJson = readJSON(
+                            text: progressResponse
+                        )
 
-                            attempt++
-
-                            if (attempt > maxAttempts) {
-                                error(
-                                    "Deployment timeout. " +
-                                    "Status masih IN_PROGRESS setelah " +
-                                    "${maxAttempts} attempts."
-                                )
-                            }
-
-                            sleep time: 5, unit: 'SECONDS'
-
-                            echo ""
-                            echo "=== Checking Deployment Progress (${attempt}/${maxAttempts}) ==="
-
-                            def progressResponse = sh(
-                                script: '''
-                                    set -e
-
-                                    curl -sS --fail-with-body \
-                                        -X POST "$URL_PROGRESS" \
-                                        -H "Content-Type: application/json" \
-                                        -d "{
-                                            \\"token_access\\": \\"$DEPLOY_TOKEN\\",
-                                            \\"website_id\\": \\"$WEBSITE_ID\\"
-                                        }"
-                                ''',
-                                returnStdout: true
-                            ).trim()
-
-                            echo "Progress Response:"
-                            echo progressResponse
-
-                            def progressJson = readJSON text: progressResponse
-
-                            deploymentStatus = progressJson.data.status
-
-                            echo "Current Deployment Status: ${deploymentStatus}"
-
-                            if (deploymentStatus == 'SUCCESS') {
-                                echo "Deployment berhasil!"
-                            } else if (deploymentStatus == 'FAIL') {
-                                error("Deployment gagal! Periksa log deployment.")
-                            } else if (deploymentStatus != 'IN_PROGRESS') {
-                                error("Status deployment tidak dikenal: ${deploymentStatus}")
-                            }
-                        }
-
-                        // ==================================================
-                        // PARSE JSON
-                        // ==================================================
-
-                        def json = readJSON text: progressResponse
-
-                        deploymentStatus = json?.data?.status
+                        deploymentStatus = progressJson?.data?.status
                             ?.toString()
                             ?.toUpperCase()
 
@@ -630,33 +618,27 @@ pipeline {
 
                         echo "Deployment Status: ${deploymentStatus}"
 
-                        // ==================================================
-                        // SUCCESS
-                        // ==================================================
-
+                        // Deployment berhasil
                         if (deploymentStatus == 'SUCCESS') {
 
                             echo ""
                             echo "=========================================="
-                            echo "       ✅ DEPLOYMENT SUCCESS"
+                            echo "       DEPLOYMENT SUCCESS"
                             echo "=========================================="
 
                             break
                         }
 
-                        // ==================================================
-                        // FAIL
-                        // ==================================================
-
+                        // Deployment gagal
                         if (deploymentStatus == 'FAIL') {
 
                             echo ""
                             echo "=========================================="
-                            echo "       ❌ DEPLOYMENT FAILED"
+                            echo "       DEPLOYMENT FAILED"
                             echo "=========================================="
 
                             def deploymentLog =
-                                json?.data?.log
+                                progressJson?.data?.log
                                     ?: 'Deployment failed tanpa log.'
 
                             echo ""
@@ -666,38 +648,32 @@ pipeline {
 
                             error(
                                 "Deployment gagal untuk website " +
-                                "${WEBSITE_ID}"
+                                "${env.WEBSITE_ID}"
                             )
                         }
 
-                        // ==================================================
-                        // OTHER STATUS
-                        // ==================================================
+                        // Status tidak dikenal
+                        if (deploymentStatus != 'IN_PROGRESS') {
+                            error(
+                                "Status deployment tidak dikenal: " +
+                                "${deploymentStatus}"
+                            )
+                        }
 
                         echo "Deployment masih berjalan..."
-
-
-                        // ==========================================
-                        // VALIDATE DEPLOYMENT CREDENTIALS
-                        // ==========================================
-
-                        if [ -z "$DEPLOY_TOKEN" ]; then
-                            echo "ERROR: DEPLOY_TOKEN belum dikonfigurasi!"
-                            exit 1
-                        fi
-
-                        if [ -z "$WEBSITE_ID" ]; then
-                            echo "ERROR: WEBSITE_ID belum dikonfigurasi!"
-                            exit 1
-                        fi
-
-                        echo "Deployment credentials berhasil ditemukan."
                     }
+
+                    // ==================================================
+                    // 4. DEPLOYMENT FINISHED
+                    // ==================================================
 
                     echo ""
                     echo "=========================================="
                     echo "       DEPLOYMENT FINISHED"
                     echo "=========================================="
+
+                    echo "Website ID: ${env.WEBSITE_ID}"
+                    echo "Artifact: ${env.ARTIFACT_URL}"
                 }
             }
         }
@@ -717,25 +693,28 @@ pipeline {
 
         success {
             echo "=========================================="
-            echo "       ✅ PIPELINE SUCCESS"
+            echo "       PIPELINE SUCCESS"
             echo "=========================================="
+
             echo "Result: ${currentBuild.currentResult}"
-            echo "📦 Artifact: ${env.ARTIFACT_URL ?: '(not published)'}"
-            echo "🚀 Website berhasil dideploy."
+            echo "Artifact: ${env.ARTIFACT_URL ?: '(not published)'}"
+            echo "Website berhasil dideploy."
         }
 
         failure {
             echo "=========================================="
-            echo "       ❌ PIPELINE FAILED"
+            echo "       PIPELINE FAILED"
             echo "=========================================="
+
             echo "Result: ${currentBuild.currentResult}"
-            echo "Periksa log stage yang merah / Console Output untuk penyebab gagal."
+            echo "Periksa log stage yang merah / Console Output."
         }
 
         unstable {
             echo "=========================================="
-            echo "       ⚠️ PIPELINE UNSTABLE"
+            echo "       PIPELINE UNSTABLE"
             echo "=========================================="
+
             echo "Result: ${currentBuild.currentResult}"
         }
     }
