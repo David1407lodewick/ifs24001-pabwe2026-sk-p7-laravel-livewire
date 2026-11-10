@@ -59,6 +59,7 @@ pipeline {
         // TEST
         // ============================================================
         
+        
         stage('Test') {
             agent {
                 docker {
@@ -72,41 +73,114 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "=== Installing PHP extensions and Composer ==="
+                    echo "======================================"
+                    echo "       PREPARING PHP ENVIRONMENT"
+                    echo "======================================"
 
-                    apk add --no-cache curl unzip git \
-                        $PHPIZE_DEPS sqlite-dev libzip-dev \
+                    echo "=== Installing system dependencies ==="
+
+                    apk add --no-cache \
+                        curl unzip git \
+                        $PHPIZE_DEPS \
+                        sqlite-dev libzip-dev \
                         libpng-dev freetype-dev libjpeg-turbo-dev \
                         oniguruma-dev libxml2-dev icu-dev
 
-                    docker-php-ext-configure gd --with-freetype --with-jpeg
+                    echo "=== Checking PHP extensions ==="
 
-                    docker-php-ext-install \
-                        pdo_sqlite sqlite3 mbstring xml dom simplexml \
-                        xmlreader xmlwriter zip gd intl
+                    php -m
 
-                    curl -sS https://getcomposer.org/installer -o composer-setup.php
-                    php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+                    REQUIRED_EXTENSIONS="
+                        pdo_sqlite
+                        sqlite3
+                        mbstring
+                        xml
+                        dom
+                        simplexml
+                        xmlreader
+                        xmlwriter
+                        zip
+                        gd
+                        intl
+                    "
+
+                    MISSING_EXTENSIONS=""
+
+                    for extension in $REQUIRED_EXTENSIONS; do
+                        if php -r "exit(extension_loaded('${extension}') ? 0 : 1);"; then
+                            echo "[OK] ${extension} sudah tersedia"
+                        else
+                            echo "[MISSING] ${extension} belum tersedia"
+                            MISSING_EXTENSIONS="$MISSING_EXTENSIONS $extension"
+                        fi
+                    done
+
+                    echo "=== Installing missing PHP extensions ==="
+
+                    if [ -n "$MISSING_EXTENSIONS" ]; then
+
+                        echo "Extensions to install: $MISSING_EXTENSIONS"
+
+                        if echo "$MISSING_EXTENSIONS" | grep -qw gd; then
+                            docker-php-ext-configure gd \
+                                --with-freetype \
+                                --with-jpeg
+                        fi
+
+                        docker-php-ext-install -j"$(nproc)" \
+                            $MISSING_EXTENSIONS
+
+                    else
+                        echo "All required PHP extensions are already available."
+                    fi
+
+                    echo "=== Verifying PHP extensions ==="
+
+                    php -m
+
+                    echo "=== Installing Composer ==="
+
+                    curl -fsSL https://getcomposer.org/installer \
+                        -o composer-setup.php
+
+                    php composer-setup.php \
+                        --install-dir=/usr/local/bin \
+                        --filename=composer
+
                     rm -f composer-setup.php
 
-                    echo "=== Preparing Laravel environment ==="
+                    composer --version
+
+                    echo "======================================"
+                    echo "       PREPARING LARAVEL"
+                    echo "======================================"
 
                     cp .env.example .env
 
                     echo "=== Installing Composer dependencies ==="
 
-                    composer install --no-interaction --prefer-dist --optimize-autoloader
+                    composer install \
+                        --no-interaction \
+                        --prefer-dist \
+                        --optimize-autoloader
+
+                    echo "=== Generating application key ==="
 
                     php artisan key:generate --force
 
-                    echo "=== Running PHPUnit tests ==="
+                    echo "======================================"
+                    echo "          RUNNING PHPUNIT"
+                    echo "======================================"
 
                     composer test
 
-                    echo "=== PHPUnit Tests Passed ==="
+                    echo "======================================"
+                    echo "       PHPUNIT TESTS PASSED"
+                    echo "======================================"
                 '''
             }
         }
+
 
         // ============================================================
         // TRIVY SECURITY SCAN
